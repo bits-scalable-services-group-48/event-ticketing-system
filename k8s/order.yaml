@@ -1,0 +1,122 @@
+# PVC for order-db
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: order-db-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+# Postgres for order service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-db
+spec:
+  selector:
+    matchLabels:
+      app: order-db
+  template:
+    metadata:
+      labels:
+        app: order-db
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: order_db
+            - name: POSTGRES_USER
+              value: order_user
+            - name: POSTGRES_PASSWORD
+              value: order_password
+          volumeMounts:
+            - name: order-storage
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: order-storage
+          persistentVolumeClaim:
+            claimName: order-db-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-db
+spec:
+  type: ClusterIP
+  selector:
+    app: order-db
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+# ConfigMap for order-service
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-config
+data:
+  SPRING_DATASOURCE_URL: jdbc:postgresql://order-db:5432/order_db
+  SPRING_DATASOURCE_USERNAME: order_user
+  SPRING_DATASOURCE_PASSWORD: order_password
+  SERVER_PORT: "8083"
+  CATALOG_SERVICE_URL: http://catalog-service:8081
+  SEATING_SERVICE_URL: http://seating-service:8082
+  PAYMENT_SERVICE_URL: http://payment-service:8084
+---
+# Order Service Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+    spec:
+      containers:
+        - name: order-service
+          image: order-service:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8083
+          envFrom:
+            - configMapRef:
+                name: order-config
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8083
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8083
+            initialDelaySeconds: 30
+            periodSeconds: 20
+---
+# Order Service NodePort
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+spec:
+  type: NodePort
+  selector:
+    app: order-service
+  ports:
+    - port: 8083
+      targetPort: 8083
+      nodePort: 30083

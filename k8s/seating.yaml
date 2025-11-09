@@ -1,0 +1,119 @@
+# PVC for seating-db
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: seating-db-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+# Postgres for seating service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seating-db
+spec:
+  selector:
+    matchLabels:
+      app: seating-db
+  template:
+    metadata:
+      labels:
+        app: seating-db
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: seating_db
+            - name: POSTGRES_USER
+              value: seating_user
+            - name: POSTGRES_PASSWORD
+              value: seating_password
+          volumeMounts:
+            - name: seating-storage
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: seating-storage
+          persistentVolumeClaim:
+            claimName: seating-db-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seating-db
+spec:
+  type: ClusterIP
+  selector:
+    app: seating-db
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+# ConfigMap for seating-service
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: seating-config
+data:
+  SPRING_DATASOURCE_URL: jdbc:postgresql://seating-db:5432/seating_db
+  SPRING_DATASOURCE_USERNAME: seating_user
+  SPRING_DATASOURCE_PASSWORD: seating_password
+  SERVER_PORT: "8082"
+---
+# Seating Service Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seating-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: seating-service
+  template:
+    metadata:
+      labels:
+        app: seating-service
+    spec:
+      containers:
+        - name: seating-service
+          image: seating-service:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8082
+          envFrom:
+            - configMapRef:
+                name: seating-config
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8082
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8082
+            initialDelaySeconds: 30
+            periodSeconds: 20
+---
+# Seating Service NodePort
+apiVersion: v1
+kind: Service
+metadata:
+  name: seating-service
+spec:
+  type: NodePort
+  selector:
+    app: seating-service
+  ports:
+    - port: 8082
+      targetPort: 8082
+      nodePort: 30082

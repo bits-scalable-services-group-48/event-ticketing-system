@@ -1,0 +1,132 @@
+# ===========================
+# PersistentVolumeClaim for Catalog DB
+# ===========================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: catalog-db-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+# ===========================
+# Postgres Deployment for Catalog Service
+# ===========================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog-db
+spec:
+  selector:
+    matchLabels:
+      app: catalog-db
+  template:
+    metadata:
+      labels:
+        app: catalog-db
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: catalog_db
+            - name: POSTGRES_USER
+              value: catalog_user
+            - name: POSTGRES_PASSWORD
+              value: catalog_password
+          volumeMounts:
+            - name: catalog-storage
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: catalog-storage
+          persistentVolumeClaim:
+            claimName: catalog-db-pvc
+---
+# ===========================
+# Service for Catalog DB (Internal)
+# ===========================
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog-db
+spec:
+  type: ClusterIP
+  selector:
+    app: catalog-db
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+# ===========================
+# ConfigMap for Catalog Service
+# ===========================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalog-config
+data:
+  SPRING_DATASOURCE_URL: jdbc:postgresql://catalog-db:5432/catalog_db
+  SPRING_DATASOURCE_USERNAME: catalog_user
+  SPRING_DATASOURCE_PASSWORD: catalog_password
+  SERVER_PORT: "8081"
+---
+# ===========================
+# Catalog Service Deployment
+# ===========================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: catalog-service
+  template:
+    metadata:
+      labels:
+        app: catalog-service
+    spec:
+      containers:
+        - name: catalog-service
+          image: catalog-service:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: catalog-config
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8081
+            initialDelaySeconds: 30
+            periodSeconds: 20
+---
+# ===========================
+# NodePort Service for Catalog Service (External)
+# ===========================
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog-service
+spec:
+  type: NodePort
+  selector:
+    app: catalog-service
+  ports:
+    - port: 8081
+      targetPort: 8081
+      nodePort: 30081
