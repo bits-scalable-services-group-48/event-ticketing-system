@@ -94,18 +94,25 @@ spec:
           envFrom:
             - configMapRef:
                 name: seating-config
-          readinessProbe:
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:+UseContainerSupport -Xms128m -Xmx256m"
+            - name: SPRING_MAIN_LAZY_INITIALIZATION
+              value: "true"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          startupProbe:
             httpGet:
               path: /actuator/health
               port: 8082
-            initialDelaySeconds: 15
             periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /actuator/health
-              port: 8082
-            initialDelaySeconds: 30
-            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 60
 ---
 # Seating Service NodePort
 apiVersion: v1

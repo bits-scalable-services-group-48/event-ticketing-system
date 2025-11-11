@@ -1,0 +1,189 @@
+version: '3.9'
+
+services:
+  # ==============================
+  # Databases (One per service)
+  # ==============================
+  catalog-db:
+    image: postgres:17
+    container_name: catalog-db
+    environment:
+      POSTGRES_USER: catalog_user
+      POSTGRES_PASSWORD: catalog_password
+      POSTGRES_DB: catalog_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - catalog_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U catalog_user -d catalog_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ticketing-network
+
+  seating-db:
+    image: postgres:17
+    container_name: seating-db
+    environment:
+      POSTGRES_USER: seating_user
+      POSTGRES_PASSWORD: seating_password
+      POSTGRES_DB: seating_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - seating_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seating_user -d seating_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ticketing-network
+
+  order-db:
+    image: postgres:17
+    container_name: order-db
+    environment:
+      POSTGRES_USER: order_user
+      POSTGRES_PASSWORD: order_password
+      POSTGRES_DB: order_db
+    ports:
+      - "5435:5432"
+    volumes:
+      - order_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U order_user -d order_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ticketing-network
+
+  payment-db:
+    image: postgres:17
+    container_name: payment-db
+    environment:
+      POSTGRES_USER: payment_user
+      POSTGRES_PASSWORD: payment_password
+      POSTGRES_DB: payment_db
+    ports:
+      - "5436:5432"
+    volumes:
+      - payment_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payment_user -d payment_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ticketing-network
+
+  # ==============================
+  # Microservices
+  # ==============================
+  catalog-service:
+    build:
+      context: ./catalog-service
+      dockerfile: Dockerfile
+    container_name: catalog-service
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://catalog-db:5432/catalog_db
+      SPRING_DATASOURCE_USERNAME: catalog_user
+      SPRING_DATASOURCE_PASSWORD: catalog_password
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    depends_on:
+      catalog-db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ticketing-network
+
+  seating-service:
+    build:
+      context: ./seating-service
+      dockerfile: Dockerfile
+    container_name: seating-service
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://seating-db:5432/seating_db
+      SPRING_DATASOURCE_USERNAME: seating_user
+      SPRING_DATASOURCE_PASSWORD: seating_password
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    depends_on:
+      seating-db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ticketing-network
+
+  payment-service:
+    build:
+      context: ./payment-service
+      dockerfile: Dockerfile
+    container_name: payment-service
+    ports:
+      - "8084:8084"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://payment-db:5432/payment_db
+      SPRING_DATASOURCE_USERNAME: payment_user
+      SPRING_DATASOURCE_PASSWORD: payment_password
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    depends_on:
+      payment-db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ticketing-network
+
+  order-service:
+    build:
+      context: ./order-service
+      dockerfile: Dockerfile
+    container_name: order-service
+    ports:
+      - "8083:8083"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://order-db:5432/order_db
+      SPRING_DATASOURCE_USERNAME: order_user
+      SPRING_DATASOURCE_PASSWORD: order_password
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SERVICES_CATALOG_URL: http://catalog-service:8081
+      SERVICES_SEATING_URL: http://seating-service:8082
+      SERVICES_PAYMENT_URL: http://payment-service:8084
+    depends_on:
+      order-db:
+        condition: service_healthy
+      catalog-service:
+        condition: service_started
+      seating-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - ticketing-network
+
+# ==============================
+# Volumes
+# ==============================
+volumes:
+  catalog_data:
+    driver: local
+  seating_data:
+    driver: local
+  order_data:
+    driver: local
+  payment_data:
+    driver: local
+
+# ==============================
+# Networks
+# ==============================
+networks:
+  ticketing-network:
+    driver: bridge
